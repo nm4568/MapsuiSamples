@@ -11,7 +11,7 @@ namespace MauiApp1
 {
     public partial class MainPage : ContentPage
     {
-        const int ZOOM_DELAY = 5000;
+        const int ZOOM_DELAY = 0;
         
         const string ARC_IMAGE_SERVICE_URL = "https://landsat2.arcgis.com/arcgis/rest/services/LandsatGLS/MS/ImageServer";
         private ArcGISImageCapabilities? _capabilities;
