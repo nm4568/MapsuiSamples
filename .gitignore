@@ -1,0 +1,5 @@
+# Ignore bin and obj directories for .NET projects
+bin/
+obj/
+.vs/
+*.csproj.user
