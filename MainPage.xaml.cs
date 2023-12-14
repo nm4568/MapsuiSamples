@@ -2,119 +2,168 @@
 using Mapsui.ArcGIS;
 using Mapsui.ArcGIS.ImageServiceProvider;
 using Mapsui.Cache;
+using Mapsui.Extensions;
 using Mapsui.Layers;
+using Mapsui.Nts.Extensions;
+using Mapsui.Providers;
 using Mapsui.Styles;
+using Mapsui.Tiling;
 using Mapsui.UI.Maui;
+using NetTopologySuite.Geometries;
+using System.Diagnostics;
+using Brush = Mapsui.Styles.Brush;
+using Color = Mapsui.Styles.Color;
 using Polygon = NetTopologySuite.Geometries.Polygon;
 
 namespace MauiApp1
 {
     public partial class MainPage : ContentPage
     {
-        const int ZOOM_DELAY = 5000;
-        
-        const string ARC_IMAGE_SERVICE_URL = "https://landsat2.arcgis.com/arcgis/rest/services/LandsatGLS/MS/ImageServer";
-        private ArcGISImageCapabilities? _capabilities;
-        public List<Polygon> PolygonList { get; set; }
-        public MapControl MyMapControl { get; set; }
+       
+        Polygon _draggedPolygon;
+        List<Coordinate> _draggedOrigCoords;
+        MPoint _touchStartedScreenPoint { get; set; }
+        ILayer _touchStartedLayer { get; set; }
+        Polygon _polygon;
+        MapControl _mapControl;
+        double x = -9188151.36056;
+        double y = 3235144.74039;
 
         public MainPage()
         {
-            RunOnMainThreadAsync(async () =>
+            InitializeComponent();
+
+            _mapControl = new Mapsui.UI.Maui.MapControl()
             {
-                InitializeComponent();
-
-                var mapControl = new Mapsui.UI.Maui.MapControl()
+                Map = new Mapsui.Map()
                 {
-                    Map = new Mapsui.Map()
-                    {
-                        CRS = "EPSG:3857",
-                    }
-                };
+                    CRS = "EPSG:3857",
+                }
+            };
 
-                MRect bbox = new(
-                    -20037508.34278
-                    , -20037508.34278
-                    , 20037508.34278
-                    , 20037508.34278
-                );
+            _mapControl.Map.Layers.Add(OpenStreetMap.CreateTileLayer());
+            _mapControl.Loaded += MapControl_Loaded;
+            _mapControl.TouchStarted += MapControl_TouchStarted;
+            _mapControl.TouchMove += MapControl_TouchMove;
+            _mapControl.TouchEnded += MapControl_TouchEnded;
 
-                mapControl.Map.Navigator.OverridePanBounds = bbox;
+            var point = new MPoint(x, y);
+            _mapControl.Map.Home = (n) => n.CenterOnAndZoomTo(point, resolution: 1000, 500, Mapsui.Animations.Easing.CubicOut);
 
-                var layer = await CreateLayerAsync(default);
-                mapControl.Map?.Layers.Add(layer);
+            Content = _mapControl;
+        }
 
-                mapControl.Loaded += MapControl_Loaded;
-                MyMapControl = mapControl;
+        private void MapControl_TouchEnded(object sender, Mapsui.UI.TouchedEventArgs e)
+        {
+            _mapControl.Map.Navigator.PanLock = false;
+            _touchStartedScreenPoint = null;
+            ClearPolygonFields();
+        }
 
-                Content = mapControl;
+        private void MapControl_TouchMove(object sender, Mapsui.UI.TouchedEventArgs e)
+        {
+            var point = e.ScreenPoints.First();
+            if (_touchStartedLayer?.Name == "Polygons")
+            {
+                MovePolygon(point, _polygon);
+            }
+        }
 
-            });
+        private void MapControl_TouchStarted(object sender, Mapsui.UI.TouchedEventArgs e)
+        {
+            var mapInfo = _mapControl.GetMapInfo(e.ScreenPoints.FirstOrDefault());
+            _touchStartedLayer = mapInfo.Layer;
+            _touchStartedScreenPoint = e.ScreenPoints.First();
         }
 
         private void MapControl_Loaded(object sender, EventArgs e)
         {
-            double x = -9188151.36056;
-            double y = 3235144.74039;
-
-            var point = new MPoint(x, y);
-            Task.Delay(ZOOM_DELAY).ContinueWith(task =>
-            {
-                MyMapControl.Map.Navigator.CenterOnAndZoomTo(point, resolution: 1000, 500, Mapsui.Animations.Easing.CubicOut);
-            });
+            var baseCoordinate = new Coordinate(x, y);
+            _polygon = CreatePolygon(baseCoordinate);
+            var polygonLayer = CreatePolygonLayer(_polygon);
+            _mapControl.Map.Layers.Add(polygonLayer);
+            _mapControl.Refresh();
         }
 
-
-        public async Task<ILayer> CreateLayerAsync(IUrlPersistentCache defaultCache)
+        private void ClearPolygonFields()
         {
-            var provider = await CreateArcGisHttpProviderAsync(defaultCache);
-            provider.CRS = "3857";
+            Debug.WriteLine("Ended");
 
-            return new ImageLayer("NOAA NCEI")
-            {
-                DataSource = provider,
-                Style = new RasterStyle()
-            };
+            _draggedPolygon = null;
+            _draggedOrigCoords = null;
         }
 
-        private async Task<ArcGISImageServiceProvider> CreateArcGisHttpProviderAsync(IUrlPersistentCache defaultCache)
+        private void MovePolygon(MPoint screenPoint, Polygon polygon)
         {
-            var capabilitiesHelper = new CapabilitiesHelper(defaultCache);
-            capabilitiesHelper.CapabilitiesReceived += CapabilitiesReceived;
-            capabilitiesHelper.GetCapabilities(ARC_IMAGE_SERVICE_URL, CapabilitiesType.ImageServiceCapabilities);
+            Debug.WriteLine($"Polygon Coord 0 X: {polygon.Coordinates.First().X}");
+            Debug.WriteLine($"Polygon Coord 0 Y: {polygon.Coordinates.First().Y}");
 
-            while (_capabilities == null)
+
+            if (_draggedPolygon == null)
             {
-                await Task.Delay(100).ConfigureAwait(false);
+                _mapControl.Map.Navigator.PanLock = true;
+                // set the dragged polygon
+                _draggedPolygon = polygon;
+                _draggedOrigCoords = polygon.Coordinates.Select(r => new Coordinate(r.X, r.Y)).ToList();
             }
-
-            return new ArcGISImageServiceProvider(_capabilities, persistentCache: defaultCache);
-
-        }
-
-        private void CapabilitiesReceived(object? sender, System.EventArgs e)
-        {
-            _capabilities = sender as ArcGISImageCapabilities;
-        }
-
-        public static Task RunOnMainThreadAsync(Func<Task> op)
-        {
-            var tcs = new TaskCompletionSource();
-
-            Application.Current?.Dispatcher.Dispatch(async () =>
+            else if (_touchStartedScreenPoint != null)
             {
-                try
+                // move polygon with screenpoint 
+                for (var i = 0; i < polygon.Coordinates.Length; i++)
                 {
-                    await op();
-                    tcs.SetResult();
-                }
-                catch (Exception e)
-                {
-                    tcs.SetException(e);
-                }
-            });
+                    var coord = polygon.Coordinates[i];
+                    var origCoord = _draggedOrigCoords[i];
+                    var firstTouchedWorldPoint = _mapControl.Map.Navigator.Viewport.ScreenToWorld(_touchStartedScreenPoint);
+                    var currentWorldPoint = _mapControl.Map.Navigator.Viewport.ScreenToWorld(screenPoint);
 
-            return tcs.Task;
+                    coord.X = Math.Round(currentWorldPoint.X - firstTouchedWorldPoint.X + origCoord.X, 5, MidpointRounding.AwayFromZero);
+                    coord.Y = Math.Round(currentWorldPoint.Y - firstTouchedWorldPoint.Y + origCoord.Y, 5, MidpointRounding.AwayFromZero);
+
+                }
+
+                _mapControl.Refresh();
+            }
+        }
+
+        private ILayer CreatePolygonLayer(Polygon polygon)
+        {
+            var polygonList = new List<Polygon> { { polygon } };
+            var layer = new Layer("Polygons")
+            {
+                DataSource = new MemoryProvider(polygonList.ToFeatures()),
+                Style = new VectorStyle
+                {
+                    Fill = new Brush(Color.Orange),
+                    Outline = new Pen
+                    {
+                        Color = Color.Orange,
+                        Width = 1,
+                        PenStyle = PenStyle.DashDotDot,
+                        PenStrokeCap = PenStrokeCap.Round
+                    }
+                },
+                Opacity = .3,
+                IsMapInfoLayer = true,
+            };
+            layer.DataSource.CRS = "EPSG:3857";
+            return layer;
+        }
+
+        private Polygon CreatePolygon(Coordinate baseCoordinate)
+        {
+            var width = 250000;
+            var height = 250000;
+
+            var point = new MPoint(baseCoordinate.X, baseCoordinate.Y);
+            var topLeft = new Coordinate(point.X - (width / 2), point.Y - (height / 2));
+            var topRight = new Coordinate(point.X + (width / 2), point.Y - (height / 2));
+            var bottomRight = new Coordinate(point.X + (width / 2), point.Y + (height / 2));
+            var bottomLeft = new Coordinate(point.X - (width / 2), point.Y + (height / 2));
+
+            var ring = new LinearRing(new[] { topLeft, topRight, bottomRight, bottomLeft, topLeft });
+            var polygon = new Polygon(ring);
+
+            return polygon;
         }
     }
 }

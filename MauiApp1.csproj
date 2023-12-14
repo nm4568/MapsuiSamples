@@ -54,7 +54,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Mapsui.ArcGIS" Version="4.1.1" />
-		<PackageReference Include="Mapsui.Maui" Version="4.1.1" />
+		<PackageReference Include="Mapsui.Maui" Version="4.1.2" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="7.0.0" />
 	</ItemGroup>
 
