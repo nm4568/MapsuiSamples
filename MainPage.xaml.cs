@@ -4,10 +4,12 @@ using Mapsui.ArcGIS.ImageServiceProvider;
 using Mapsui.Cache;
 using Mapsui.Extensions;
 using Mapsui.Layers;
+using Mapsui.Nts;
 using Mapsui.Nts.Extensions;
 using Mapsui.Providers;
 using Mapsui.Styles;
 using Mapsui.Tiling;
+using Mapsui.UI;
 using Mapsui.UI.Maui;
 using NetTopologySuite.Geometries;
 using System.Diagnostics;
@@ -20,7 +22,8 @@ namespace MauiApp1
     public partial class MainPage : ContentPage
     {
        
-        Polygon _draggedPolygon;
+        GeometryFeature _draggedPolygon;
+        GeometryFeature _polygonFeature;
         List<Coordinate> _draggedOrigCoords;
         MPoint _touchStartedScreenPoint { get; set; }
         ILayer _touchStartedLayer { get; set; }
@@ -80,7 +83,8 @@ namespace MauiApp1
         {
             var baseCoordinate = new Coordinate(x, y);
             _polygon = CreatePolygon(baseCoordinate);
-            var polygonLayer = CreatePolygonLayer(_polygon);
+            _polygonFeature = _polygon.ToFeature();
+            var polygonLayer = CreatePolygonLayer(_polygonFeature);
             _mapControl.Map.Layers.Add(polygonLayer);
             _mapControl.Refresh();
         }
@@ -103,7 +107,7 @@ namespace MauiApp1
             {
                 _mapControl.Map.Navigator.PanLock = true;
                 // set the dragged polygon
-                _draggedPolygon = polygon;
+                _draggedPolygon = polygon.ToFeature();
                 _draggedOrigCoords = polygon.Coordinates.Select(r => new Coordinate(r.X, r.Y)).ToList();
             }
             else if (_touchStartedScreenPoint != null)
@@ -121,16 +125,17 @@ namespace MauiApp1
 
                 }
 
+                _draggedPolygon.RenderedGeometry.Clear();
                 _mapControl.Refresh();
             }
         }
 
-        private ILayer CreatePolygonLayer(Polygon polygon)
+        private ILayer CreatePolygonLayer(GeometryFeature polygon)
         {
-            var polygonList = new List<Polygon> { { polygon } };
-            var layer = new Layer("Polygons")
+            var polygonList = new List<GeometryFeature> { { polygon } };
+            var layer = new WritableLayer()
             {
-                DataSource = new MemoryProvider(polygonList.ToFeatures()),
+                Name = "Polygons",
                 Style = new VectorStyle
                 {
                     Fill = new Brush(Color.Orange),
@@ -145,7 +150,7 @@ namespace MauiApp1
                 Opacity = .3,
                 IsMapInfoLayer = true,
             };
-            layer.DataSource.CRS = "EPSG:3857";
+            layer.AddRange(polygonList);
             return layer;
         }
 
